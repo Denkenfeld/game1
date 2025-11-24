@@ -23,9 +23,10 @@
 <canvas id="c"></canvas>
 <script>
 // ═══════════════════════════════════════════════════════
-// MATH BLASTER NEO – Fixed Cyberpunk Math Shooter
-// Click/Tap START button or ANYWHERE to play | P: Pause
-// A/D ←→ Move | Space/Mouse Shoot | Enter: Start
+// MATH BLASTER NEO – ULTIMATE EDITION (Power-ups + Modes + Fixes!)
+// NO SPOILER ANSWER! Question changes ONLY on CORRECT hit.
+// Modes: EASY (kids 6+), MEDIUM, HARD | Power-ups: RAPID/2X/SLOW/SHIELD
+// Epic ship: wings, cockpit, flames!
 // ═══════════════════════════════════════════════════════
 
 const canvas = document.getElementById('c');
@@ -42,18 +43,20 @@ window.addEventListener('resize', resize);
 // Neon Palette
 const NEON = {
     pink: '#ff00aa', cyan: '#00ffff', green: '#00ff41',
-    purple: '#bf00ff', yellow: '#ffff00', red: '#ff0044', white: '#ffffff'
+    purple: '#bf00ff', yellow: '#ffff00', red: '#ff0044', white: '#ffffff', orange: '#ff8800'
 };
 
 // Game State
 let state = 'start'; // start, playing, paused, gameover
+let mode = 'medium'; // easy, medium, hard
 let score = 0, lives = 3, level = 1, combo = 0;
 let highScore = parseInt(localStorage.getItem('mbneo_hs')) || 0;
-let player = {x: 0, y: 0, size: 40, speed: 8};
-let bullets = [], enemies = [], particles = [], stars = [];
+let player = {x: 0, y: 0, size: 45, speed: 9};
+let bullets = [], enemies = [], particles = [], stars = [], powerupTimers = {}, flashMessages = [];
 let keys = {}, shootTimer = 0;
 let currentQuestion = {}, spawnTimer = 0;
-let buttonHovered = false;
+let buttonHovered = -1; // 0=easy,1=med,2=hard
+let correctFlash = {active: false, answer: 0, life: 0};
 
 // Audio
 let audioCtx;
@@ -72,12 +75,12 @@ function beep(freq=440, dur=0.1, type='triangle') {
     o.start(); o.stop(audioCtx.currentTime + dur);
 }
 
-// Input Events
+// Input
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
     if (e.key === ' ') e.preventDefault();
     if (e.key.toLowerCase() === 'p') togglePause();
-    if ((e.key === 'Enter' || e.key === ' ') && (state === 'start' || state === 'gameover')) startGame();
+    if (e.key === 'Enter' && (state === 'start' || state === 'gameover')) startGame(mode);
 });
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
@@ -86,33 +89,37 @@ canvas.addEventListener('mousemove', e => {
     mouseX = e.clientX - rect.left;
     mouseY = e.clientY - rect.top;
 });
-canvas.addEventListener('click', e => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left;
-    mouseY = e.clientY - rect.top;
-    if (state === 'playing') {
-        shoot();
-    } else if (state === 'start' || state === 'gameover') {
-        if (isOnButton(mouseX, mouseY)) startGame();
-    }
-});
+canvas.addEventListener('click', handleClick);
 canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
     mouseX = touch.clientX - rect.left;
     mouseY = touch.clientY - rect.top;
-    if (state === 'playing') shoot();
-    else if (state === 'start' || state === 'gameover') {
-        if (isOnButton(mouseX, mouseY)) startGame();
-    }
+    handleClick();
 }, {passive: false});
 
-function isOnButton(x, y) {
-    const btnW = 400, btnH = 100;
-    const btnX = w / 2 - btnW / 2;
-    const btnY = state === 'start' ? h / 2 + 250 : h / 2 + 380;
-    return x > btnX && x < btnX + btnW && y > btnY && y < btnY + btnH;
+function handleClick() {
+    if (state === 'playing') {
+        shoot();
+    } else if (state === 'start' || state === 'gameover') {
+        const btn = getButtonUnderMouse();
+        if (btn >= 0) {
+            mode = ['easy','medium','hard'][btn];
+            startGame(mode);
+        }
+    }
+}
+
+function getButtonUnderMouse() {
+    const btnW = 350, btnH = 90, gap = 30;
+    const startY = h / 2 + 150;
+    for (let i = 0; i < 3; i++) {
+        const btnX = w / 2 - btnW / 2;
+        const btnY = startY + i * (btnH + gap);
+        if (mouseX > btnX && mouseX < btnX + btnW && mouseY > btnY && mouseY < btnY + btnH) return i;
+    }
+    return -1;
 }
 
 function togglePause() {
@@ -123,24 +130,43 @@ function togglePause() {
 }
 
 function newQuestion() {
-    const opTypes = level <= 2 ? ['+'] : level <= 4 ? ['+', '-'] : level <= 7 ? ['+', '-', '×'] : ['+', '-', '×', '÷'];
-    const op = opTypes[Math.floor(Math.random() * opTypes.length)];
+    const ranges = {easy: {max:10, ops:['+','-']}, medium:{max:18, ops:['+','-','×']}, hard:{max:25, ops:['+','-','×','÷']}};
+    const r = ranges[mode];
+    const op = r.ops[Math.floor(Math.random() * r.ops.length)];
     let a, b, ans;
     switch (op) {
-        case '+': a = 1 + Math.floor(Math.random() * 15); b = 1 + Math.floor(Math.random() * 15); ans = a + b; break;
-        case '-': a = 5 + Math.floor(Math.random() * 20); b = 1 + Math.floor(Math.random() * (a - 1)); ans = a - b; break;
-        case '×': a = 2 + Math.floor(Math.random() * 8); b = 2 + Math.floor(Math.random() * 8); ans = a * b; break;
-        case '÷': b = 2 + Math.floor(Math.random() * 8); a = b * (2 + Math.floor(Math.random() * 8)); ans = a / b; break;
+        case '+': a = 1 + Math.floor(Math.random() * r.max); b = 1 + Math.floor(Math.random() * r.max); ans = a + b; break;
+        case '-': a = r.max + Math.floor(Math.random() * 10); b = 1 + Math.floor(Math.random() * a); ans = a - b; break;
+        case '×': a = 2 + Math.floor(Math.random() * 10); b = 2 + Math.floor(Math.random() * 8); ans = a * b; break;
+        case '÷': b = 2 + Math.floor(Math.random() * 8); a = b * (2 + Math.floor(Math.random() * 10)); ans = a / b; break;
     }
-    currentQuestion = {text: `${a} ${op} ${b} = ?`, answer: ans};
+    currentQuestion = {text: `${a} ${op === '×' ? '×' : op === '÷' ? '÷' : op} ${b} = ?`, answer: Math.floor(ans)};
 }
 
 function spawnEnemy() {
-    const correctChance = 0.28 + level * 0.02;
+    const isPowerup = Math.random() < 0.018; // 1.8% powerup
+    if (isPowerup) {
+        const types = ['rapid','double','slow','shield'];
+        const type = types[Math.floor(Math.random()*types.length)];
+        const labels = {rapid:'RAPID', double:'2X', slow:'SLOW', shield:'SHIELD'};
+        enemies.push({
+            x: 80 + Math.random() * (w - 160),
+            y: -80,
+            type, label: labels[type],
+            speed: 1.2 + level * 0.2,
+            size: 55,
+            wave: Math.random() * Math.PI * 2,
+            rot: 0,
+            isPowerup: true
+        });
+        return;
+    }
+    // Normal enemy
+    const correctChance = 0.26 + level * 0.015 + (mode === 'easy' ? 0.1 : 0);
     const correct = Math.random() < correctChance;
     let num = currentQuestion.answer;
     if (!correct) {
-        const offset = Math.max(1, Math.floor(level / 2));
+        const offset = Math.max(1, Math.floor((level + (mode==='easy'?0:2)) / 2));
         num += Math.floor(Math.random() * (offset * 2 + 1)) - offset;
         while (num === currentQuestion.answer) num += Math.sign(Math.random() - 0.5);
         num = Math.max(1, Math.min(99, num));
@@ -149,8 +175,8 @@ function spawnEnemy() {
         x: 80 + Math.random() * (w - 160),
         y: -80,
         num, correct,
-        speed: 1.8 + level * 0.28,
-        size: 45 + level * 2.5,
+        speed: 1.6 + level * 0.3 * (mode === 'easy' ? 0.7 : 1),
+        size: 48 + level * 2,
         wave: Math.random() * Math.PI * 2,
         rot: 0
     });
@@ -158,44 +184,56 @@ function spawnEnemy() {
 
 function shoot() {
     if (shootTimer > 0 || state !== 'playing') return;
-    bullets.push({x: player.x, y: player.y - 20, vy: -14, life: 70});
-    shootTimer = 7 - Math.floor(level / 5);
-    beep(850 + Math.random() * 150, 0.07, 'square');
+    const rapidActive = powerupTimers.rapid > 0;
+    bullets.push({x: player.x, y: player.y - 25, vy: -15 - (rapidActive ? 2 : 0), life: 75});
+    shootTimer = (rapidActive ? 3 : 9) - Math.floor(level / 8);
+    beep(850 + Math.random() * 200, 0.06, 'square');
 }
 
-function explode(x, y, color) {
-    for (let i = 0; i < 28; i++) {
+function activatePowerup(type) {
+    const dur = 750; // ~12 sec
+    powerupTimers[type] = dur;
+    const msgs = {rapid:'RAPID FIRE!', double:'DOUBLE SCORE!', slow:'ENEMIES SLOW!', shield:'SHIELD UP!'};
+    flashMessages.push({text: msgs[type], life: 120, color: NEON.purple});
+    beep(1100, 0.4, 'sine');
+}
+
+function explode(x, y, color, size=1) {
+    for (let i = 0; i < 32 * size; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const vel = 4 + Math.random() * 10;
+        const vel = 3 + Math.random() * 12;
         particles.push({
             x, y,
             vx: Math.cos(angle) * vel,
-            vy: Math.sin(angle) * vel * 0.7,
-            life: 35 + Math.random() * 35,
-            maxLife: 35 + Math.random() * 35,
+            vy: Math.sin(angle) * vel * 0.6,
+            life: 40 + Math.random() * 40,
+            maxLife: 40 + Math.random() * 40,
             color,
-            size: 2 + Math.random() * 6
+            size: 2 + Math.random() * 7
         });
     }
 }
 
 // Stars
-for (let i = 0; i < 250; i++) {
+for (let i = 0; i < 300; i++) {
     stars.push({
         x: Math.random() * w,
         y: Math.random() * h,
-        s: 0.4 + Math.random() * 1.8,
-        v: 0.4 + Math.random() * 1.2,
+        s: 0.3 + Math.random() * 2,
+        v: 0.3 + Math.random() * 1.5,
         twinkle: Math.random() * Math.PI * 2
     });
 }
 
-function startGame() {
+function startGame(m) {
+    mode = m;
     state = 'playing';
     score = 0; lives = 3; level = 1; combo = 0;
-    bullets = []; enemies = []; particles = [];
-    player.x = w / 2; player.y = h - 130;
+    bullets = []; enemies = []; particles = []; flashMessages = [];
+    powerupTimers = {};
+    player.x = w / 2; player.y = h - 140;
     spawnTimer = 0;
+    correctFlash.active = false;
     newQuestion();
     beep(550, 0.5);
 }
@@ -205,18 +243,24 @@ function gameOver() {
     if (score > highScore) {
         highScore = score;
         localStorage.setItem('mbneo_hs', highScore);
-        beep(1100, 0.8, 'sine');
+        beep(1200, 1, 'sine');
     }
-    beep(200, 0.6, 'sawtooth');
+    beep(180, 0.7, 'sawtooth');
 }
 
-// UPDATE LOOP (logic only - FIXED NO DOUBLE RAF!)
+// UPDATE
 function update() {
+    // Powerup timers
+    Object.keys(powerupTimers).forEach(k => {
+        if (powerupTimers[k] > 0) powerupTimers[k]--;
+        else delete powerupTimers[k];
+    });
+
     // Stars
     stars.forEach(s => {
         s.y += s.v;
-        s.twinkle += 0.15;
-        if (s.y > h) s.y = -s.s * 10;
+        s.twinkle += 0.12;
+        if (s.y > h) s.y = -s.s * 15;
     });
 
     if (state === 'playing') {
@@ -233,7 +277,7 @@ function update() {
 
         // Spawn
         spawnTimer++;
-        const spawnRate = Math.max(25, 85 - level * 5);
+        const spawnRate = Math.max(20, 80 - level * 6 - (mode === 'easy' ? 10 : 0));
         if (spawnTimer > spawnRate) {
             spawnEnemy();
             spawnTimer = 0;
@@ -244,44 +288,57 @@ function update() {
             const b = bullets[i];
             b.y += b.vy;
             b.life--;
-            if (b.y < -30 || b.life <= 0) bullets.splice(i, 1);
+            if (b.y < -40 || b.life <= 0) bullets.splice(i, 1);
         }
 
         // Enemies
         for (let i = enemies.length - 1; i >= 0; i--) {
             const e = enemies[i];
-            e.y += e.speed;
-            e.x += Math.sin(Date.now() * 0.001 + e.wave) * 2.2;
-            e.wave += 0.05;
-            e.rot += 0.1;
-            if (e.y > h + 80) {
+            const slowMult = powerupTimers.slow > 0 ? 0.45 : 1;
+            e.y += e.speed * slowMult;
+            e.x += Math.sin(Date.now() * 0.001 + e.wave) * 2.5;
+            e.wave += 0.04;
+            e.rot += 0.12;
+            if (e.y > h + 100) {
                 enemies.splice(i, 1);
-                lives--;
-                combo = 0;
-                beep(180, 0.4, 'sawtooth');
+                if (e.isPowerup || powerupTimers.shield) {
+                    if (powerupTimers.shield) powerupTimers.shield = false;
+                } else {
+                    lives--;
+                    combo = 0;
+                    beep(160, 0.45, 'sawtooth');
+                }
                 if (lives <= 0) gameOver();
             }
         }
 
-        // Collisions (bullet-enemy)
+        // Collisions
         for (let bi = bullets.length - 1; bi >= 0; bi--) {
             const b = bullets[bi];
             for (let ei = enemies.length - 1; ei >= 0; ei--) {
                 const e = enemies[ei];
-                const dx = b.x - e.x;
-                const dy = b.y - e.y;
-                if (Math.hypot(dx, dy) < e.size / 2 + 5) {
+                const dx = b.x - e.x, dy = b.y - e.y;
+                if (Math.hypot(dx, dy) < e.size / 2 + 6) {
                     bullets.splice(bi, 1);
                     enemies.splice(ei, 1);
-                    explode(e.x, e.y, e.correct ? NEON.pink : NEON.yellow);
-                    if (e.correct) {
-                        score += 150 * level * (combo + 1);
-                        combo = Math.min(combo + 1, 25);
-                        if (combo % 10 === 0) level++;
-                        beep(650 + combo * 30, 0.25, 'triangle');
+                    if (e.isPowerup) {
+                        activatePowerup(e.type);
+                        explode(e.x, e.y, NEON.purple, 1.5);
+                    } else if (e.correct) {
+                        correctFlash.active = true;
+                        correctFlash.answer = e.num;
+                        correctFlash.life = 90;
+                        explode(e.x, e.y, NEON.pink, 1.2);
+                        const mult = powerupTimers.double > 0 ? 2 : 1;
+                        score += 200 * level * (combo + 1) * mult;
+                        combo = Math.min(combo + 1, 30);
+                        if (combo % 12 === 0) level++;
+                        newQuestion(); // NEW QUESTION ON CORRECT!
+                        beep(700 + combo * 25, 0.3, 'triangle');
                     } else {
+                        explode(e.x, e.y, NEON.yellow);
                         combo = 0;
-                        beep(220, 0.35, 'sawtooth');
+                        beep(250, 0.4, 'sawtooth');
                     }
                     break;
                 }
@@ -291,125 +348,179 @@ function update() {
         // Particles
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
-            p.x += p.vx *= 0.97;
-            p.y += p.vy += 0.18;
+            p.vx *= 0.96;
+            p.vy += 0.2;
+            p.x += p.vx;
+            p.y += p.vy;
             p.life--;
             if (p.life <= 0) particles.splice(i, 1);
         }
+
+        // Flash messages
+        for (let i = flashMessages.length - 1; i >= 0; i--) {
+            flashMessages[i].life--;
+            if (flashMessages[i].life <= 0) flashMessages.splice(i, 1);
+        }
+
+        // Correct flash
+        if (correctFlash.active) {
+            correctFlash.life--;
+            if (correctFlash.life <= 0) correctFlash.active = false;
+        }
     } else if (state === 'start' || state === 'gameover') {
-        buttonHovered = isOnButton(mouseX, mouseY);
+        buttonHovered = getButtonUnderMouse();
     }
 }
 
-// RENDER LOOP
+// RENDER
 function draw() {
-    // Clear + Gradient BG
+    // BG Gradient
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#000022');
-    grad.addColorStop(0.7, '#000011');
-    grad.addColorStop(1, '#000000');
+    grad.addColorStop(0, '#000033'); grad.addColorStop(0.6, '#000012'); grad.addColorStop(1, '#000000');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
-    // Stars (twinkling)
+    // Stars
     ctx.save();
     ctx.shadowColor = NEON.green;
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = 15;
     stars.forEach(s => {
-        const alpha = 0.4 + Math.sin(s.twinkle) * 0.4;
+        const alpha = 0.5 + Math.sin(s.twinkle) * 0.4;
         ctx.globalAlpha = alpha;
         ctx.fillStyle = NEON.green;
-        ctx.fillRect(s.x, s.y, s.s, s.s * 3);
+        ctx.fillRect(s.x, s.y, s.s, s.s * 4);
     });
     ctx.restore();
     ctx.globalAlpha = 1;
 
-    // Game Playing
     if (state === 'playing' || state === 'paused') {
-        // Big Math Question TARGET
+        // QUESTION (NO ANSWER SPOILER!)
         ctx.save();
-        ctx.shadowBlur = 45;
+        ctx.shadowBlur = 50;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = NEON.cyan;
         ctx.fillStyle = NEON.cyan;
-        ctx.font = 'bold 72px Courier New';
-        ctx.fillText(currentQuestion.text, w / 2, 110);
-        ctx.shadowColor = NEON.pink;
-        ctx.shadowBlur = 70;
-        ctx.fillStyle = NEON.pink;
-        ctx.font = 'bold 110px Courier New';
-        ctx.fillText(currentQuestion.answer.toString(), w / 2, 210);
+        ctx.font = 'bold 85px Courier New';
+        ctx.fillText(currentQuestion.text, w / 2, 120);
         ctx.restore();
 
-        // Enemies (glowing orbs w/ pulse)
+        // CORRECT FLASH
+        if (correctFlash.active) {
+            ctx.save();
+            const flashAlpha = correctFlash.life / 90;
+            ctx.globalAlpha = flashAlpha;
+            ctx.shadowBlur = 100 * flashAlpha;
+            ctx.shadowColor = NEON.pink;
+            ctx.fillStyle = NEON.pink;
+            ctx.font = 'bold 140px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`CORRECT! ${correctFlash.answer}`, w / 2, h / 2);
+            ctx.restore();
+        }
+
+        // Enemies
         enemies.forEach(e => {
             ctx.save();
-            const glow = e.correct ? NEON.pink : NEON.green;
-            ctx.shadowColor = glow;
-            ctx.shadowBlur = 35 + (e.correct ? Math.sin(Date.now() / 150) * 20 : 0);
-            ctx.fillStyle = glow;
+            let glowColor = e.isPowerup ? NEON.purple : (e.correct ? NEON.pink : NEON.green);
+            let glowBlur = e.isPowerup ? 45 : (e.correct ? 40 + Math.sin(Date.now() / 200) * 25 : 30);
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = glowBlur;
+            ctx.fillStyle = glowColor;
             ctx.translate(e.x, e.y);
             ctx.rotate(e.rot);
             ctx.beginPath();
             ctx.arc(0, 0, e.size / 2, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
-            ctx.fillStyle = '#001122';
-            ctx.font = `bold ${e.size / 2.3}px Courier New`;
+            ctx.fillStyle = '#001133';
+            ctx.font = `bold ${e.size / 2.2}px Courier New`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(e.num, 0, 0);
-            ctx.shadowBlur = 25;
+            ctx.fillText(e.label || e.num.toString(), 0, 0);
+            ctx.shadowBlur = 30;
             ctx.fillStyle = NEON.white;
-            ctx.fillText(e.num, 0, 0);
+            ctx.fillText(e.label || e.num.toString(), 0, 0);
             ctx.restore();
         });
 
-        // Player Ship (cyber ship w/ engine)
+        // AWESOME SHIP
         ctx.save();
-        ctx.shadowColor = NEON.cyan;
-        ctx.shadowBlur = 55;
-        ctx.fillStyle = NEON.cyan;
         ctx.translate(player.x, player.y);
+        ctx.shadowColor = NEON.cyan;
+        ctx.shadowBlur = 60;
+        // Main body
+        ctx.fillStyle = NEON.cyan;
         ctx.beginPath();
-        ctx.moveTo(0, -player.size / 1.6);
-        ctx.lineTo(-player.size / 1.6, player.size / 1.6);
-        ctx.lineTo(player.size / 1.6, player.size / 1.6);
+        ctx.moveTo(0, -player.size / 1.4);
+        ctx.lineTo(-player.size / 1.3, player.size / 1.4);
+        ctx.lineTo(-player.size / 2.2, player.size / 1.8);
+        ctx.lineTo(player.size / 2.2, player.size / 1.8);
+        ctx.lineTo(player.size / 1.3, player.size / 1.4);
         ctx.closePath();
         ctx.fill();
-        // Thruster glow
-        const thrustPulse = Math.sin(Date.now() / 100) * 0.4 + 0.6;
-        ctx.shadowBlur = 65 * thrustPulse;
+        // Wings
+        ctx.shadowColor = NEON.purple;
+        ctx.shadowBlur = 40;
+        ctx.fillStyle = NEON.purple;
+        ctx.beginPath();
+        ctx.moveTo(-player.size / 1.3, player.size / 1.4);
+        ctx.lineTo(-player.size * 1.6, player.size / 1.2);
+        ctx.lineTo(-player.size / 2.2, player.size / 1.8);
+        ctx.lineTo(-player.size / 2.2, player.size / 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(player.size / 1.3, player.size / 1.4);
+        ctx.lineTo(player.size * 1.6, player.size / 1.2);
+        ctx.lineTo(player.size / 2.2, player.size / 1.8);
+        ctx.lineTo(player.size / 2.2, player.size / 2);
+        ctx.fill();
+        // Cockpit
         ctx.shadowColor = NEON.yellow;
+        ctx.shadowBlur = 35;
         ctx.fillStyle = NEON.yellow;
         ctx.beginPath();
-        ctx.ellipse(0, player.size / 1.4, 18, 28, 0, 0, Math.PI * 2);
+        ctx.arc(0, -player.size / 3, player.size / 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        // Thrusters
+        const pulse = Math.sin(Date.now() / 80) * 0.5 + 0.5;
+        ctx.shadowBlur = 80 * pulse;
+        ctx.shadowColor = NEON.orange;
+        ctx.fillStyle = NEON.orange;
+        // Main thruster
+        ctx.beginPath();
+        ctx.ellipse(0, player.size / 1.3, 22 * pulse, 35 * pulse, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Side thrusters
+        ctx.beginPath();
+        ctx.ellipse(-player.size / 2.5, player.size / 2, 12 * pulse, 20 * pulse, 0, 0, Math.PI * 2);
+        ctx.ellipse(player.size / 2.5, player.size / 2, 12 * pulse, 20 * pulse, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
-        // Bullets (laser trails)
+        // Bullets
         ctx.save();
         ctx.shadowColor = NEON.pink;
-        ctx.shadowBlur = 25;
+        ctx.shadowBlur = 28;
         ctx.strokeStyle = NEON.pink;
-        ctx.lineWidth = 6;
+        ctx.lineWidth = 7;
         ctx.lineCap = 'round';
         bullets.forEach(b => {
             ctx.beginPath();
-            ctx.moveTo(b.x, b.y + 20);
+            ctx.moveTo(b.x, b.y + 25);
             ctx.lineTo(b.x, b.y);
             ctx.stroke();
         });
         ctx.restore();
 
-        // Particles/Explosions
+        // Particles
         ctx.save();
         particles.forEach(p => {
             const alpha = p.life / p.maxLife;
             ctx.globalAlpha = alpha * alpha;
             ctx.shadowColor = ctx.fillStyle = p.color;
-            ctx.shadowBlur = 22;
+            ctx.shadowBlur = 25;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fill();
@@ -419,129 +530,167 @@ function draw() {
 
         // HUD
         ctx.save();
-        ctx.shadowBlur = 28;
+        ctx.shadowBlur = 32;
         ctx.shadowColor = NEON.purple;
         ctx.fillStyle = NEON.white;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.font = 'bold 38px Courier New';
-        ctx.fillText(`SCORE: ${score.toLocaleString()}`, 35, 45);
-        ctx.fillText(`LEVEL: ${level}`, 35, 92);
+        ctx.font = 'bold 40px Courier New';
+        ctx.fillText(`SCORE: ${score.toLocaleString()}`, 40, 50);
+        ctx.fillText(`LEVEL: ${level}`, 40, 98);
         ctx.shadowColor = NEON.yellow;
         ctx.fillStyle = NEON.yellow;
-        ctx.fillText(`COMBO: x${combo}`, 35, 140);
-        // Lives Hearts
+        ctx.fillText(`COMBO: x${combo}`, 40, 148);
+        // Lives
         ctx.textAlign = 'right';
         for (let i = 0; i < lives; i++) {
-            const hx = w - 60 - i * 55;
+            const hx = w - 70 - i * 60;
             ctx.shadowColor = ctx.fillStyle = NEON.red;
-            ctx.shadowBlur = 25;
-            ctx.font = '60px Courier New';
-            ctx.fillText('♥', hx, 55);
+            ctx.shadowBlur = 30;
+            ctx.font = '65px Courier New';
+            ctx.fillText('♥', hx, 58);
+        }
+        // Powerup icons
+        let hudY = 220;
+        if (powerupTimers.rapid > 0) {
+            ctx.fillStyle = NEON.purple;
+            ctx.fillText('RAPID', w - 250, hudY);
+            ctx.fillText(`${Math.ceil(powerupTimers.rapid/60)}s`, w - 150, hudY);
+            hudY += 45;
+        }
+        if (powerupTimers.double > 0) {
+            ctx.fillStyle = NEON.yellow;
+            ctx.fillText('2X SCORE', w - 250, hudY);
+            ctx.fillText(`${Math.ceil(powerupTimers.double/60)}s`, w - 150, hudY);
+            hudY += 45;
+        }
+        if (powerupTimers.slow > 0) {
+            ctx.fillStyle = NEON.green;
+            ctx.fillText('SLOW MO', w - 250, hudY);
+            ctx.fillText(`${Math.ceil(powerupTimers.slow/60)}s`, w - 150, hudY);
         }
         ctx.restore();
+
+        // Flash messages
+        flashMessages.forEach(m => {
+            ctx.save();
+            const alpha = m.life / 120;
+            ctx.globalAlpha = alpha;
+            ctx.shadowBlur = 80 * alpha;
+            ctx.shadowColor = m.color;
+            ctx.fillStyle = m.color;
+            ctx.font = 'bold 70px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(m.text, w / 2, 300);
+            ctx.restore();
+        });
     }
 
     // OVERLAYS
     if (state !== 'playing') {
-        ctx.fillStyle = 'rgba(0,0,15,0.88)';
+        ctx.fillStyle = 'rgba(0,0,20,0.9)';
         ctx.fillRect(0, 0, w, h);
 
         // Title
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowBlur = 90;
-        ctx.font = 'bold 130px Courier New';
+        ctx.shadowBlur = 100;
+        ctx.font = 'bold 135px Courier New';
         ctx.shadowColor = NEON.pink;
         ctx.fillStyle = NEON.pink;
-        ctx.fillText('MATH', w / 2, h / 2 - 80);
+        ctx.fillText('MATH', w / 2, h / 2 - 90);
         ctx.shadowColor = NEON.cyan;
         ctx.fillStyle = NEON.cyan;
-        ctx.fillText('BLASTER', w / 2, h / 2 + 20);
-        ctx.font = 'bold 100px Courier New';
+        ctx.fillText('BLASTER', w / 2, h / 2 + 15);
+        ctx.font = 'bold 110px Courier New';
         ctx.shadowColor = NEON.purple;
+        ctx.shadowBlur = 85;
         ctx.fillStyle = NEON.purple;
-        ctx.shadowBlur = 75;
-        ctx.fillText('NEO', w / 2, h / 2 + 130);
+        ctx.fillText('NEO', w / 2, h / 2 + 140);
         ctx.restore();
     }
 
     if (state === 'gameover') {
         ctx.save();
-        ctx.shadowBlur = 100;
+        ctx.shadowBlur = 110;
         ctx.shadowColor = NEON.red;
         ctx.fillStyle = NEON.red;
-        ctx.font = 'bold 120px Courier New';
+        ctx.font = 'bold 130px Courier New';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('GAME OVER', w / 2, h / 2 + 220);
-        ctx.shadowBlur = 35;
+        ctx.fillText('GAME OVER', w / 2, h / 2 + 250);
+        ctx.shadowBlur = 40;
         ctx.shadowColor = NEON.white;
         ctx.fillStyle = NEON.white;
-        ctx.font = 'bold 52px Courier New';
-        ctx.fillText(`FINAL: ${score.toLocaleString()}`, w / 2, h / 2 + 310);
+        ctx.font = 'bold 55px Courier New';
+        ctx.fillText(`FINAL: ${score.toLocaleString()}`, w / 2, h / 2 + 350);
         if (score === highScore) {
             ctx.shadowColor = NEON.yellow;
             ctx.fillStyle = NEON.yellow;
-            ctx.font = 'bold 48px Courier New';
-            ctx.fillText('NEW HIGH SCORE!', w / 2, h / 2 + 375);
+            ctx.font = 'bold 52px Courier New';
+            ctx.fillText('NEW HIGH SCORE!', w / 2, h / 2 + 420);
         }
         ctx.restore();
     } else if (state === 'paused') {
-        ctx.fillStyle = 'rgba(0,0,40,0.95)';
+        ctx.fillStyle = 'rgba(0,0,50,0.97)';
         ctx.fillRect(0, 0, w, h);
         ctx.save();
         ctx.shadowColor = NEON.yellow;
-        ctx.shadowBlur = 100;
+        ctx.shadowBlur = 110;
         ctx.fillStyle = NEON.yellow;
-        ctx.font = 'bold 150px Courier New';
+        ctx.font = 'bold 160px Courier New';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
         ctx.fillText('PAUSED', w / 2, h / 2);
-        ctx.font = 'bold 45px Courier New';
-        ctx.shadowBlur = 30;
+        ctx.font = 'bold 48px Courier New';
+        ctx.shadowBlur = 35;
         ctx.fillStyle = NEON.white;
-        ctx.fillText('Press P to Resume', w / 2, h / 2 + 100);
+        ctx.fillText('Press P to Resume', w / 2, h / 2 + 110);
         ctx.restore();
     }
 
-    // START/RESTART BUTTON (with hover glow)
-    const btnW = 420, btnH = 110;
-    const btnX = w / 2 - btnW / 2;
-    const btnY = state === 'start' ? h / 2 + 280 : h / 2 + 420;
-    ctx.save();
-    const hoverGlow = buttonHovered ? 70 : 45;
-    ctx.shadowColor = NEON.green;
-    ctx.shadowBlur = hoverGlow;
-    ctx.fillStyle = buttonHovered ? '#00ff88' : NEON.green;
-    ctx.fillRect(btnX, btnY, btnW, btnH);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = '#000';
-    ctx.font = 'bold 65px Courier New';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(state === 'start' ? 'START GAME' : 'PLAY AGAIN', w / 2, btnY + btnH / 2);
-    ctx.restore();
+    // MODE BUTTONS
+    const btnW = 380, btnH = 95, gap = 35;
+    const startY = h / 2 + 120;
+    const modeColors = [NEON.green, NEON.yellow, NEON.orange];
+    const modeTexts = ['EASY (Kids 6+)', 'MEDIUM', 'HARD'];
+    for (let i = 0; i < 3; i++) {
+        const btnX = w / 2 - btnW / 2;
+        const btnY = startY + i * (btnH + gap);
+        ctx.save();
+        const isHover = buttonHovered === i;
+        const glow = isHover ? 65 : 50;
+        ctx.shadowColor = modeColors[i];
+        ctx.shadowBlur = glow;
+        ctx.fillStyle = isHover ? '#ffffff' : modeColors[i];
+        ctx.fillRect(btnX, btnY, btnW, btnH);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 55px Courier New';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(modeTexts[i], w / 2, btnY + btnH / 2);
+        ctx.restore();
+    }
 
     // Instructions
     if (state === 'start') {
         ctx.save();
         ctx.shadowBlur = 0;
         ctx.fillStyle = NEON.green;
-        ctx.font = 'bold 32px Courier New';
+        ctx.font = 'bold 34px Courier New';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText('Shoot the CORRECT answer! (Pink glow = right one)', w / 2, h / 2 + 200);
-        ctx.font = '28px Courier New';
-        ctx.fillText('A/D Arrows: MOVE | Space/Click/Tap: SHOOT | P: PAUSE | Enter: Start', w / 2, h / 2 + 250);
+        ctx.fillText('Shoot PINK orbs (correct answer) & PURPLE power-ups!', w / 2, h / 2 + 80);
+        ctx.font = '30px Courier New';
+        ctx.fillText('A/D Arrows: MOVE | Space/Click/Tap: SHOOT | P: PAUSE', w / 2, h / 2 + 110);
         ctx.restore();
     }
 
     ctx.shadowBlur = 0;
 }
 
-// GAME LOOP (smooth 60fps)
+// LOOP
 function loop() {
     update();
     draw();
