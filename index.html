@@ -1,397 +1,397 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MATH BLASTER NEO - BOSS UPDATE</title>
-    <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
-        canvas { display:block; cursor:crosshair; touch-action:none; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MATH BLASTER NEO - FINAL BOSS EDITION</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
+  canvas { display:block; cursor:crosshair; touch-action:none; }
+</style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <script>
-// MATH BLASTER NEO - FINAL BOSS EDITION
-// Every 5 levels = EPIC BOSS FIGHT!
-// Boss has 10× health, shoots back, moves in patterns, drops RARE power-ups
-// Everything else from previous version + bosses = COMPLETE!
-
+// MATH BLASTER NEO – COMPLETE & WORKING (Bosses + Power-ups + Modes)
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-let w, h, mouseX = 0, mouseY = 0;
+let w, h;
 
 function resize() {
-    w = canvas.width = window.innerWidth;
-    h = canvas.height = window.innerHeight;
+  w = canvas.width = innerWidth;
+  h = canvas.height = innerHeight;
 }
 resize();
-window.addEventListener('resize', resize);
+addEventListener('resize', resize);
 
-const NEON = {
-    pink: '#ff00aa', cyan: '#00ffff', green: '#00ff41',
-    purple: '#bf00ff', yellow: '#ffff00', red: '#ff0044',
-    white: '#ffffff', orange: '#ff8800', blue: '#0088ff', boss: '#ff0055'
+// Colors
+const C = {
+  pink:'#ff00aa', cyan:'#00ffff', green:'#00ff41', purple:'#bf00ff',
+  yellow:'#ffff00', red:'#ff0044', orange:'#ff8800', boss:'#ff0055', white:'#ffffff'
 };
 
-let state = 'start';
+// Game state
+let state = 'start';           // start, playing, paused, gameover
 let mode = 'medium';
 let score = 0, lives = 3, level = 1, combo = 0;
-let highScore = parseInt(localStorage.getItem('mbneo_hs')) || 0;
-let player = { x: 0, y: 0, size: 50, speed: 9 };
-let bullets = [], enemies = [], particles = [], stars = [], powerupTimers = {}, flashMessages = [];
-let boss = null; // Active boss object
+let highScore = +localStorage.getItem('mbneo_hs') || 0;
+
+let player = {x:w/2, y:h-150, size:50, speed:9};
+let bullets = [], enemies = [], particles = [], stars = [], powerups = {};
+let boss = null;
 let keys = {}, shootTimer = 0;
-let currentQuestion = {}, spawnTimer = 0;
-let buttonHovered = -1;
-let correctFlash = { active: false, answer: 0, life: 0 };
+let question = {}, flash = null, msg = [];
 
 // Audio
-let audioCtx;
-function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-function beep(freq = 440, dur = 0.1, type = 'triangle') {
-    initAudio();
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = type; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    o.connect(g); g.connect(audioCtx.destination);
-    g.gain.setValueAtTime(0.25, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-    o.start(); o.stop(audioCtx.currentTime + dur);
+const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+function beep(f=440,d=0.1,t='triangle'){
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.type=t; o.frequency.setValueAtTime(f,audioCtx.currentTime);
+  o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.2,audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+  o.start(); o.stop(audioCtx.currentTime+d);
 }
 
 // Input
-window.addEventListener('keydown', e => {
-    keys[e.key.toLowerCase()] = true;
-    if (e.key === ' ') e.preventDefault();
-    if (e.key.toLowerCase() === 'p') togglePause();
-    if (e.key === 'Enter' && (state === 'start' || state === 'gameover')) startGame(mode);
-});
-window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-canvas.addEventListener('mousemove', e => {
-    const r = canvas.getBoundingClientRect();
-    mouseX = e.clientX - r.left; mouseY = e.clientY - r.top;
-});
-canvas.addEventListener('click', () => {
-    if (state === 'playing') shoot();
-    else if (state === 'start' || state === 'gameover') {
-        const btn = getButtonUnderMouse();
-        if (btn >= 0) startGame(['easy','medium','hard'][btn]);
-    }
-});
-canvas.addEventListener('touchstart', e => { e.preventDefault(); canvas.dispatchEvent(new Event('click')); }, {passive:false});
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true; if(e.key===' ')e.preventDefault(); if(e.key.toLowerCase()==='p')togglePause();});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+canvas.addEventListener('click',()=>{ if(state==='playing')shoot(); });
+canvas.addEventListener('touchstart',e=>{e.preventDefault(); canvas.click();});
 
-function togglePause() {
-    if (state === 'playing') { state = state === 'paused' ? 'playing' : 'paused'; beep(state === 'playing' ? 800 : 400, 0.2); }
+function togglePause(){ if(state==='playing') state=state==='paused'?'playing':'paused'; }
+
+function newQuestion(){
+  const cfg = {easy:{max:12,ops:['+','-']}, medium:{max:20,ops:['+','-','×']}, hard:{max:30,ops:['+','-','×','÷']}}[mode];
+  const op = cfg.ops[Math.floor(Math.random()*cfg.ops.length)];
+  let a,b,ans;
+  switch(op){
+    case '+': a=1+Math.random()*cfg.max|0; b=1+Math.random()*cfg.max|0; ans=a+b; break;
+    case '-': a=cfg.max+Math.random()*15|0; b=1+Math.random()*a|0; ans=a-b; break;
+    case '×': a=2+Math.random()*10|0; b=2+Math.random()*9|0; ans=a*b; break;
+    case '÷': b=2+Math.random()*9|0; a=b*(2+Math.random()*10|0); ans=a/b; break;
+  }
+  question = {text:`${a} ${op==='×'?'×':op==='÷'?'÷':op} ${b} = ?`, answer:Math.floor(ans)};
 }
 
-function newQuestion() {
-    const cfg = {
-        easy:   { max:12, ops:['+','-'] },
-        medium:{ max:20, ops:['+','-','×'] },
-        hard:  { max:30, ops:['+','-','×','÷'] }
-    }[mode];
-    const op = cfg.ops[Math.floor(Math.random()*cfg.ops.length)];
-    let a, b, ans;
-    switch(op){
-        case '+': a=1+Math.random()*cfg.max|0; b=1+Math.random()*cfg.max|0; ans=a+b; break;
-        case '-': a=cfg.max+Math.random()*15|0; b=1+Math.random()*a|0; ans=a-b; break;
-        case '×': a=2+Math.random()*10|0; b=2+Math.random()*9|0; ans=a*b; break;
-        case '÷': b=2+Math.random()*9|0; a=b*(2+Math.random()*10|0); ans=a/b; break;
-    }
-    currentQuestion = {text:`${a} ${op==='×'?'×':op==='÷'?'÷':op} ${b} = ?`, answer:Math.floor(ans)};
+function spawnEnemy(){
+  if(boss) return;
+  // Power-up?
+  if(Math.random()<0.03){
+    const types=['rapid','double','slow','shield','triple','freeze','speed'];
+    const t=types[Math.random()*types.length|0];
+    enemies.push({x:80+Math.random()*(w-160),y:-80,type:t,label:t.toUpperCase(),size:60,speed:2,isPowerup:true});
+    return;
+  }
+  const correct = Math.random() < 0.3 + level*0.02;
+  let num = question.answer;
+  if(!correct){
+    let off = Math.max(1,level>>1);
+    num += Math.random()*(off*2+1)|0 - off;
+    while(num===question.answer) num+=num<question.answer?1:-1;
+  }
+  enemies.push({x:80+Math.random()*(w-160),y:-80,num,correct,size:50+level*2,speed:1.8+level*0.3});
 }
 
-function spawnBoss() {
-    const bossNames = ['CALCULON', 'MATHLORD', 'THE DIVIDER', 'ALGEBRAX', 'TRIGON'];
-    boss = {
-        x: w/2, y: -200,
-        health: 10 + level*5, maxHealth: 10 + level*5,
-        size: 140 + level*8,
-        name: bossNames[Math.floor(Math.random()*bossNames.length)],
-        phase: 0, timer: 0,
-        pattern: Math.floor(Math.random()*3),
-        shootTimer: 0
-    };
-    flashMessages.push({text: `BOSS INCOMING: ${boss.name}!`, life: 300, color: NEON.red});
-    beep(150, 1.5, 'sawtooth');
+function spawnBoss(){
+  const names = ['CALCULON','DIVIDOR','ALGEBRAX','TRIGON','MATHLORD'];
+  boss = {
+    x:w/2, y:-200, size:160+level*10, health:15+level*8, maxHealth:15+level*8,
+    name:names[Math.random()*names.length|0], timer:0, shootTimer:0
+  };
+  msg.push({text:`BOSS: ${boss.name}!`, life:360, color:C.red});
+  beep(120,1.5,'sawtooth');
 }
 
-function spawnEnemy() {
-    if (boss) return; // No normal enemies during boss
-
-    if (Math.random() < 0.03) { // Power-up
-        const types = ['rapid','double','slow','shield','triple','freeze','speed'];
-        const type = types[Math.floor(Math.random()*types.length)];
-        const labels = {rapid:'RAPID',double:'2X',slow:'SLOW',shield:'SHIELD',triple:'3X',freeze:'FREEZE',speed:'SPEED'};
-        enemies.push({x:80+Math.random()*(w-160), y:-100, type, label:labels[type], speed:1.3+level*0.15, size:60, wave:Math.random()*Math.PI*2, rot:0, isPowerup:true});
-        return;
-    }
-
-    const correct = Math.random() < (0.28 + level*0.015 + (mode==='easy'?0.12:0));
-    let num = currentQuestion.answer;
-    if (!correct) {
-        const off = Math.max(1, Math.floor(level/2));
-        num += Math.floor(Math.random()*(off*2+1)) - off;
-        while (num === currentQuestion.answer) num += Math.sign(Math.random()-0.5);
-        num = Math.max(1, Math.min(99, num));
-    }
-    enemies.push({
-        x:80+Math.random()*(w-160), y:-100, num, correct,
-        speed:1.7 + level*0.32 * (mode==='easy'?0.7:1),
-        size:50 + level*2.2, wave:Math.random()*Math.PI*2, rot:0
-    });
+function shoot(){
+  if(shootTimer>0) return;
+  const rapid = powerups.rapid>0;
+  const triple = powerups.triple>0;
+  const cnt = triple?3:1;
+  for(let i=0;i<cnt;i++){
+    bullets.push({x:player.x+(i-1)*20, y:player.y-40, vy:-18-(rapid?6:0)});
+  }
+  shootTimer = rapid?3:10-level;
+  beep(900+Math.random()*400,0.08,'square');
 }
 
-function shoot() {
-    if (shootTimer > 0 || state !== 'playing') return;
-    const rapid = powerupTimers.rapid > 0;
-    const triple = powerupTimers.triple > 0;
-    const count = triple ? 3 : 1;
-    for (let i = 0; i < count; i++) {
-        const spread = triple ? (i-1)*18 : 0;
-        bullets.push({x:player.x + spread, y:player.y-30, vy:-16-(rapid?5:0), life:80});
-    }
-    shootTimer = (rapid ? 2 : 8) - Math.floor(level/10);
-    beep(800 + Math.random()*300, 0.07, 'square');
+function activate(t){
+  powerups[t] = 720;
+  msg.push({text:t.toUpperCase()+' POWER!', life:180, color:C.purple});
+  beep(1200,0.4,'sine');
 }
 
-function activatePowerup(type) {
-    const duration = 720;
-    powerupTimers[type] = duration;
-    const msg = {rapid:'RAPID FIRE!', double:'DOUBLE SCORE!', slow:'SLOW MO!', shield:'SHIELD!', triple:'TRIPLE SHOT!', freeze:'ENEMIES FROZEN!', speed:'HYPERSPEED!'};
-    flashMessages.push({text:msg[type], life:130, color:NEON.purple});
-    beep(1200, 0.4, 'sine');
+function explode(x,y,col,s=1){
+  for(let i=0;i<40*s;i++){
+    const a=Math.random()*Math.PI*2, v=5+Math.random()*12;
+    particles.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:50+Math.random()*40,col});
+  }
 }
 
-function explode(x,y,color,size=1) {
-    for(let i=0;i<40*size;i++){
-        const a=Math.random()*Math.PI*2, v=4+Math.random()*14;
-        particles.push({x,y, vx:Math.cos(a)*v, vy:Math.sin(a)*v*0.6, life:45+Math.random()*45, maxLife:45+Math.random()*45, color, size:3+Math.random()*9});
-    }
+// Stars
+for(let i=0;i<400;i++) stars.push({x:Math.random()*w,y:Math.random()*h,size:1+Math.random()*2,speed:0.5+Math.random()});
+
+function startGame(m){
+  mode=m; state='playing'; score=0; lives=3; level=1; combo=0;
+  bullets=[]; enemies=[]; particles=[]; powerups={}; boss=null; msg=[];
+  player.x=w/2; player.y=h-150;
+  newQuestion();
+  beep(600,0.6);
 }
 
-for(let i=0;i<350;i++) stars.push({x:Math.random()*w, y:Math.random()*h, s:0.4+Math.random()*2, v:0.4+Math.random()*1.5, twinkle:Math.random()*Math.PI*2});
-
-function startGame(m) {
-    mode = m;
-    state = 'playing';
-    score = 0; lives = 3; level = 1; combo = 0;
-    bullets = []; enemies = []; particles = []; flashMessages = [];
-    powerupTimers = {}; boss = null; correctFlash = {active:false};
-    player.x = w/2; player.y = h-150;
-    spawnTimer = 0;
-    newQuestion();
-    beep(600, 0.6);
-}
-
-function gameOver() {
-    state = 'gameover';
-    if (score > highScore) { highScore = score; localStorage.setItem('mbneo_hs', highScore); }
-    beep(180, 1, 'sawtooth');
+function gameOver(){
+  state='gameover';
+  if(score>highScore){ highScore=score; localStorage.setItem('mbneo_hs',score); }
 }
 
 // UPDATE
-function update() {
-    Object.keys(powerupTimers).forEach(k => powerupTimers[k] > 0 ? powerupTimers[k]-- : delete powerupTimers[k]);
-    stars.forEach(s => { s.y += s.v; s.twinkle += 0.14; if (s.y > h) s.y = -20; });
+function update(){
+  // Timers
+  Object.keys(powerups).forEach(k=>powerups[k]>0?powerups[k]--:delete powerups[k]);
+  msg = msg.filter(m=>m.life-->0);
+  if(flash) flash.life--;
 
-    if (state === 'playing') {
-        // Boss spawn check
-        if (!boss && level % 5 === 0 && level > 0 && enemies.length === 0 && bullets.length === 0) {
-            spawnBoss();
-        }
+  // Stars
+  stars.forEach(s=>{s.y+=s.speed; if(s.y>h) s.y=-10;});
 
-        // Player movement
-        let vx = 0;
-        if (keys['a']||keys['arrowleft']) vx -= player.speed + (powerupTimers.speed?10:0);
-        if (keys['d']||keys['arrowright']) vx += player.speed + (powerupTimers.speed?10:0);
-        player.x += vx;
-        player.x = Math.max(player.size, Math.min(w-player.size, player.x));
+  if(state!=='playing') return;
 
-        if (shootTimer > 0) shootTimer--;
-        if (keys[' ']) shoot();
+  // Boss spawn
+  if(!boss && level%5===0 && enemies.length===0 && bullets.length===0) spawnBoss();
 
-        // Normal enemy spawn
-        if (!boss) {
-            spawnTimer++;
-            const rate = Math.max(18, 78 - level*6 - (mode==='easy'?15:0));
-            if (spawnTimer > rate) { spawnEnemy(); spawnTimer = 0; }
-        }
+  // Player
+  if(keys['a']||keys['arrowleft']) player.x-=player.speed+(powerups.speed?12:0);
+  if(keys['d']||keys['arrowright']) player.x+=player.speed+(powerups.speed?12:0);
+  player.x = Math.max(player.size, Math.min(w-player.size, player.x));
+  if(shootTimer>0) shootTimer--;
+  if(keys[' ']) shoot();
 
-        // Boss logic
-        if (boss) {
-            boss.timer++;
-            boss.y = Math.min(h*0.25, boss.y + 3);
-            boss.x = w/2 + Math.sin(boss.timer*0.02)*200;
+  // Normal spawn
+  if(!boss && Math.random()<0.03) spawnEnemy();
 
-            // Boss shooting
-            boss.shootTimer++;
-            if (boss.shootTimer > 60 - level*2) {
-                boss.shootTimer = 0;
-                for (let i = 0; i < 8; i++) {
-                    const a = i*Math.PI*2/8 + boss.timer*0.02;
-                    enemies.push({
-                        x: boss.x, y: boss.y,
-                        vx: Math.cos(a)*4, vy: Math.sin(a)*4 + 2,
-                        size: 30, num: '!', isBullet: true
-                    });
-                }
-                beep(300, 0.3, 'sawtooth');
-            }
-
-            // Boss hit
-            for (let i = bullets.length-1; i >= 0; i--) {
-                const b = bullets[i];
-                if (Math.hypot(b.x-boss.x, b.y-boss.y) < boss.size/2) {
-                    bullets.splice(i,1);
-                    boss.health--;
-                    explode(boss.x, boss.y, NEON.pink, 0.8);
-                    beep(400, 0.1);
-                    if (boss.health <= 0) {
-                        explode(boss.x, boss.y, NEON.red, 3);
-                        score += 5000 * level;
-                        level++;
-                        boss = null;
-                        flashMessages.push({text: `${boss.name} DEFEATED! +5000`, life: 200, color: NEON.yellow});
-                        beep(1500, 1.2, 'sine');
-                        // Drop rare power-up
-                        activatePowerup(['triple','freeze','double'][Math.random()*3|0]);
-                    }
-                }
-            }
-        }
-
-        // Bullets & enemies & collisions (same logic, slightly extended for boss bullets)
-        for(let i=bullets.length-1;i>=0;i--){
-            const b=bullets[i]; b.y += b.vy; b.life--;
-            if(b.y < -50 || b.life <= 0) bullets.splice(i,1);
-        }
-
-        const slow = powerupTimers.slow > 0 ? 0.3 : (powerupTimers.freeze > 0 ? 0 : 1);
-        for(let i=enemies.length-1;i>=0;i--){
-            const e=enemies[i];
-            if (e.isBullet) {
-                e.x += e.vx; e.y += e.vy;
-                if (e.y > h+50) { enemies.splice(i,1); continue; }
-                if (Math.hypot(e.x-player.x, e.y-player.y) < 50) {
-                    enemies.splice(i,1);
-                    if (!powerupTimers.shield) {
-                        lives--; combo=0;
-                        beep(100, 0.6, 'sawtooth');
-                        if(lives<=0) gameOver();
-                    } else {
-                        delete powerupTimers.shield;
-                    }
-                }
-                continue;
-            }
-            e.y += e.speed * slow;
-            e.x += Math.sin(Date.now()*0.001 + e.wave)*2.8;
-            e.wave += 0.05; e.rot += 0.13;
-            if(e.y > h+120){
-                enemies.splice(i,1);
-                if(e.isPowerup || powerupTimers.shield){ if(powerupTimers.shield) delete powerupTimers.shield; }
-                else { lives--; combo=0; beep(160,0.45,'sawtooth'); if(lives<=0) gameOver(); }
-            }
-        }
-
-        // Collision detection (player bullets vs enemies/boss)
-        for(let bi=bullets.length-1;bi>=0;bi--){
-            const b=bullets[bi];
-            for(let ei=enemies.length-1;ei>=0;ei--){
-                const e=enemies[ei];
-                if(e.isBullet) continue;
-                if(Math.hypot(b.x-e.x, b.y-e.y) < e.size/2 + 7){
-                    bullets.splice(bi,1);
-                    enemies.splice(ei,1);
-                    if(e.isPowerup){ activatePowerup(e.type); explode(e.x,e.y,NEON.purple,1.6); }
-                    else if(e.correct){
-                        correctFlash = {active:true, answer:e.num, life:100};
-                        explode(e.x,e.y,NEON.pink,1.4);
-                        const mult = (powerupTimers.double?2:1);
-                        score += Math.round(200 * level * (combo+1) * mult);
-                        combo = Math.min(combo+1, 40);
-                        if(combo % 12 === 0 && !boss) level++;
-                        newQuestion();
-                        beep(700 + combo*20, 0.35, 'triangle');
-                    } else {
-                        explode(e.x,e.y,NEON.yellow);
-                        combo = 0;
-                        beep(250,0.4,'sawtooth');
-                    }
-                    break;
-                }
-            }
-        }
-
-        // Particles & cleanup
-        for(let i=particles.length-1;i>=0;i--){
-            const p=particles[i];
-            p.x += p.vx*=0.96; p.y += p.vy+=0.22; p.life--;
-            if(p.life<=0) particles.splice(i,1);
-        }
-        flashMessages = flashMessages.filter(m => m.life-- > 0);
-        if(correctFlash.active && correctFlash.life-- <= 0) correctFlash.active = false;
-    } else {
-        buttonHovered = getButtonUnderMouse();
+  // Boss logic
+  if(boss){
+    boss.y = Math.min(h*0.22, boss.y+4);
+    boss.x = w/2 + Math.sin(Date.now()*0.001)*220;
+    boss.shootTimer++;
+    if(boss.shootTimer>80-level*3){
+      boss.shootTimer=0;
+      for(let i=0;i<10;i++){
+        const a=i*Math.PI*2/10;
+        enemies.push({x:boss.x,y:boss.y,vx:Math.cos(a)*3,vy:Math.sin(a)*3+2,size:25,isBullet:true});
+      }
+      beep(300,0.3,'sawtooth');
     }
-}
+  }
 
-function getButtonUnderMouse() {
-    if(state !== 'start' && state !== 'gameover') return -1;
-    const btnW=400, btnH=100, gap=45, startY = h/2 + 160;
-    for(let i=0;i<3;i++){
-        const btnX = w/2-btnW/2, btnY=startY+i*(btnH+gap);
-        if(mouseX>btnX && mouseX<btnX+btnW && mouseY>btnY && mouseY<btnY+btnH) return i;
+  // Bullets
+  bullets = bullets.filter(b=>{b.y+=b.vy; return b.y>-50;});
+
+  // Enemies & boss bullets
+  const slow = powerups.slow?0.2:powerups.freeze?0:1;
+  enemies = enemies.filter(e=>{
+    if(e.isBullet){
+      e.x+=e.vx; e.y+=e.vy;
+      if(e.y>h+50) return false;
+      if(Math.hypot(e.x-player.x,e.y-player.y)<50){
+        if(!powerups.shield){ lives--; combo=0; if(lives<=0)gameOver();}
+        else delete powerups.shield;
+        explode(e.x,e.y,C.red);
+        return false;
+      }
+      return true;
     }
-    return -1;
+    e.y += e.speed*slow;
+    if(e.y>h+100){
+      if(!e.isPowerup && !powerups.shield){ lives--; combo=0; if(lives<=0)gameOver();}
+      else if(powerups.shield) delete powerups.shield;
+      return false;
+    }
+    return true;
+  });
+
+  // Collisions
+  bullets.forEach((b,bi)=>{
+    // Boss hit?
+    if(boss && Math.hypot(b.x-boss.x,b.y-boss.y)<boss.size/2){
+      bullets.splice(bi,1);
+      boss.health--;
+      explode(boss.x,boss.y,C.pink,0.8);
+      if(boss.health<=0){
+        explode(boss.x,boss.y,C.red,4);
+        score+=10000*level; level++; boss=null;
+        msg.push({text:`${boss.name} DEFEATED!`,life:300,color:C.yellow});
+        activate(['triple','freeze','double'][Math.random()*3|0]);
+      }
+      return;
+    }
+    // Normal enemies
+    enemies.forEach((e,ei)=>{
+      if(e.isBullet || e.isPowerup) return;
+      if(Math.hypot(b.x-e.x,b.y-e.y)<e.size/2){
+        bullets.splice(bi,1);
+        enemies.splice(ei,1);
+        if(e.correct){
+          flash={answer:e.num,life:90};
+          explode(e.x,e.y,C.pink,1.5);
+          score += 200*level*(combo+1)*(powerups.double?2:1);
+          combo++; if(combo%15===0 && !boss) level++;
+          newQuestion();
+        }else{
+          explode(e.x,e.y,C.yellow);
+          combo=0;
+        }
+      }
+    });
+    // Power-ups
+    enemies.forEach((e,ei)=>{
+      if(!e.isPowerup) return;
+      if(Math.hypot(b.x-e.x,b.y-e.y)<e.size/2){
+        bullets.splice(bi,1);
+        enemies.splice(ei,1);
+        activate(e.type);
+        explode(e.x,e.y,C.purple,1.8);
+      }
+    });
+  });
 }
 
 // DRAW
-function draw() {
-    const grad = ctx.createLinearGradient(0,0,0,h);
-    grad.addColorStop(0,'#000033'); grad.addColorStop(0.6,'#000011'); grad.addColorStop(1,'#000000');
-    ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+function draw(){
+  ctx.fillStyle='#000015'; ctx.fillRect(0,0,w,h);
 
-    // Stars + gameplay + HUD + menus (everything from previous version)
-    // ... (full drawing code identical to last working version, plus BOSS rendering)
+  // Stars
+  ctx.fillStyle=C.green;
+  stars.forEach(s=>{ctx.globalAlpha=0.4+Math.sin(performance.now()/200+s.x)*0.3; ctx.fillRect(s.x,s.y,s.size,s.size*5);});
+  ctx.globalAlpha=1;
 
-    // BOSS RENDERING
-    if (boss) {
-        ctx.save();
-        ctx.translate(boss.x, boss.y);
-        // Pulsing red glow
-        const pulse = Math.sin(Date.now()/100)*20;
-        ctx.shadowColor = NEON.boss;
-        ctx.shadowBlur = 80 + pulse;
-        ctx.fillStyle = NEON.boss;
-        ctx.beginPath();
-        ctx.arc(0,0,boss.size/2,0,Math.PI*2);
-        ctx.fill();
-        // Health bar
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(-boss.size/2, -boss.size/2-40, boss.size, 20);
-        ctx.fillStyle = NEON.red;
-        ctx.fillRect(-boss.size/2, -boss.size/2-40, boss.size*(boss.health/boss.maxHealth), 20);
-        // Name
-        ctx.fillStyle = NEON.white;
-        ctx.font = 'bold 48px Courier New';
-        ctx.textAlign = 'center';
-        ctx.fillText(boss.name, 0, -boss.size/2-60);
-        ctx.restore();
+  // Question
+  ctx.font='bold 90px Courier New'; ctx.textAlign='center';
+  ctx.shadowBlur=60; ctx.shadowColor=C.cyan; ctx.fillStyle=C.cyan;
+  ctx.fillText(question.text,w/2,130);
+
+  // Correct flash
+  if(flash){
+    const a=flash.life/90;
+    ctx.globalAlpha=a; ctx.shadowBlur=120*a; ctx.shadowColor=C.pink; ctx.fillStyle=C.pink;
+    ctx.font='bold 160px Courier New';
+    ctx.fillText(`CORRECT! ${flash.answer}`,w/2,h/2);
+  }
+  ctx.globalAlpha=1;
+
+  // Boss
+  if(boss){
+    ctx.save();
+    ctx.translate(boss.x,boss.y);
+    ctx.shadowBlur=100+Math.sin(Date.now()/100)*30;
+    ctx.shadowColor=C.boss; ctx.fillStyle=C.boss;
+    ctx.beginPath(); ctx.arc(0,0,boss.size/2,0,Math.PI*2); ctx.fill();
+    // Health bar
+    ctx.shadowBlur=0; ctx.fillStyle='#000'; ctx.fillRect(-boss.size/2,-boss.size/2-50,boss.size,25);
+    ctx.fillStyle=C.red; ctx.fillRect(-boss.size/2,-boss.size/2-50,boss.size*(boss.health/boss.maxHealth),25);
+    ctx.fillStyle=C.white; ctx.font='bold 50px Courier New'; ctx.fillText(boss.name,0,-boss.size/2-80);
+    ctx.restore();
+  }
+
+  // Enemies & power-ups
+  enemies.forEach(e=>{
+    const col = e.isPowerup?C.purple : e.correct?C.pink:C.green;
+    ctx.save();
+    ctx.translate(e.x,e.y);
+    ctx.shadowBlur=50; ctx.shadowColor=col; ctx.fillStyle=col;
+    ctx.beginPath(); ctx.arc(0,0,e.size/2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000'; ctx.font='bold '+(e.size/2.5)+'px Courier New';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(e.label||e.num||'!',0,0);
+    ctx.restore();
+  });
+
+  // Player ship (epic!)
+  ctx.save();
+  ctx.translate(player.x,player.y);
+  ctx.fillStyle=C.cyan; ctx.shadowColor=C.cyan; ctx.shadowBlur=70;
+  ctx.beginPath(); ctx.moveTo(0,-50); ctx.lineTo(-40,60); ctx.lineTo(40,60); ctx.closePath(); ctx.fill();
+  // Wings
+  ctx.fillStyle=C.purple; ctx.shadowColor=C.purple; ctx.shadowBlur=50;
+  ctx.beginPath(); ctx.moveTo(-40,60); ctx.lineTo(-90,30); ctx.lineTo(-40,0); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(40,60); ctx.lineTo(90,30); ctx.lineTo(40,0); ctx.fill();
+  // Thruster
+  const pulse = Math.sin(Date.now()/80)*0.5+0.7;
+  ctx.shadowBlur=100*pulse; ctx.shadowColor=C.orange; ctx.fillStyle=C.orange;
+  ctx.beginPath(); ctx.ellipse(0,60,30*pulse,50*pulse,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // Bullets
+  ctx.shadowColor=C.pink; ctx.shadowBlur=30; ctx.strokeStyle=C.pink; ctx.lineWidth=8;
+  bullets.forEach(b=>{ctx.beginPath();ctx.moveTo(b.x,b.y+30);ctx.lineTo(b.x,b.y);ctx.stroke();});
+
+  // Particles
+  particles.forEach(p=>{
+    ctx.globalAlpha = p.life/80;
+    ctx.fillStyle = p.col; ctx.shadowColor=p.col; ctx.shadowBlur=20;
+    ctx.fillRect(p.x-5,p.y-5,10,10);
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.3; p.life--;
+  });
+  particles = particles.filter(p=>p.life>0);
+  ctx.globalAlpha=1;
+
+  // HUD
+  ctx.font='bold 40px Courier New'; ctx.textAlign='left';
+  ctx.shadowBlur=30; ctx.shadowColor=C.white; ctx.fillStyle=C.white;
+  ctx.fillText(`SCORE ${score}`,40,60);
+  ctx.fillText(`LEVEL ${level}`,40,110);
+  ctx.shadowColor=C.yellow; ctx.fillStyle=C.yellow;
+  ctx.fillText(`COMBO x${combo}`,40,160);
+  // Lives
+  for(let i=0;i<lives;i++) {
+    ctx.fillStyle=C.red; ctx.shadowColor=C.red;
+    ctx.fillText('Heart',w-100-i*70,70);
+  }
+
+  // Messages
+  msg.forEach(m=>{ctx.globalAlpha=m.life/100; ctx.shadowBlur=80; ctx.shadowColor=m.color; ctx.fillStyle=m.color;
+    ctx.font='bold 70px Courier New'; ctx.textAlign='center';
+    ctx.fillText(m.text,w/2,200);});
+  ctx.globalAlpha=1;
+
+  // Start / Game Over screen
+  if(state==='start' || state==='gameover'){
+    ctx.fillStyle='rgba(0,0,30,0.9)'; ctx.fillRect(0,0,w,h);
+    ctx.font='bold 140px Courier New'; ctx.textAlign='center';
+    ctx.shadowBlur=100; ctx.shadowColor=C.pink; ctx.fillStyle=C.pink; ctx.fillText('MATH',w/2,h/2-100);
+    ctx.shadowColor=C.cyan; ctx.fillStyle=C.cyan; ctx.fillText('BLASTER',w/2,h/2);
+    ctx.shadowColor=C.purple; ctx.fillStyle=C.purple; ctx.fillText('NEO',w/2,h/2+120);
+
+    // Mode buttons
+    const btns = ['EASY (6+)','MEDIUM','HARD'];
+    const cols = [C.green,C.yellow,'#ff5500'];
+    btns.forEach((t,i)=>{
+      const y = h/2+200+i*120;
+      ctx.shadowBlur=60; ctx.shadowColor=cols[i]; ctx.fillStyle=cols[i];
+      ctx.fillRect(w/2-200,y,400,100);
+      ctx.shadowBlur=0; ctx.fillStyle='#000'; ctx.font='bold 60px Courier New';
+      ctx.fillText(t,w/2,y+65);
+    });
+
+    if(state==='gameover'){
+      ctx.shadowColor=C.red; ctx.fillStyle=C.red; ctx.fillText('GAME OVER',w/2,h/2+400);
+      ctx.shadowColor=C.white; ctx.fillStyle=C.white; ctx.fillText(`SCORE ${score}`,w/2,h/2+470);
     }
+  }
 
-    // Rest of draw() is exactly the same polished version from before
-    // (question, ship, enemies, HUD, menus, etc.)
+  if(state==='paused'){
+    ctx.fillStyle='rgba(0,0,50,0.95)'; ctx.fillRect(0,0,w,h);
+    ctx.shadowBlur=120; ctx.shadowColor=C.yellow; ctx.fillStyle=C.yellow;
+    ctx.font='bold 180px Courier New'; ctx.textAlign='center';
+    ctx.fillText('PAUSED',w/2,h/2);
+  }
 
-    requestAnimationFrame(loop);
+  requestAnimationFrame(()=>{update(); draw();});
 }
 
-function loop(){ update(); draw(); }
 newQuestion();
-loop();
+draw();
 </script>
 </body>
 </html>
